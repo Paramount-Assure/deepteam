@@ -1,0 +1,833 @@
+<h1 id="integration-report-deepteam-secmate">INTEGRATION REPORT:
+DeepTeam ↔︎ SecMate</h1>
+<p><strong>Date:</strong> 2026-10-07<br />
+<strong>Prepared For:</strong> Paramount Computer Systems - Internal AI
+Agent Assurance<br />
+<strong>Scope:</strong> Integration procedures and readiness report for
+integrating DeepTeam (LLM Red Teaming Framework) with SecMate (Internal
+AI-Agent Security Assessment Platform)</p>
+<hr />
+<h2 id="executive-summary">Executive Summary</h2>
+<p>DeepTeam and SecMate are highly complementary platforms for internal
+AI agent security assurance. SecMate provides the user interface,
+workflow orchestration philosophy, typed data contracts, and strict
+safety requirements defined in its Technical Requirements Documents
+(TRD-1, TRD-2, TRD-2A). DeepTeam provides a mature, production-ready LLM
+red teaming engine with 50+ vulnerabilities, 20+ adversarial attacks,
+multi-turn simulation capabilities, and framework mappings to industry
+standards (OWASP, MITRE ATLAS, NIST AI RMF).</p>
+<p>The recommended integration approach is to implement a SecMate
+backend API that acts as an orchestration broker between the React/Vite
+frontend and DeepTeam’s Python engine. This will bridge SecMate’s
+mock-driven UI to live assessment execution while strictly enforcing
+SecMate’s core principles: action-space primacy, dual-stage verification
+(deterministic checks before semantic judging), fail-closed behavior,
+bounded multi-turn execution, and zero credential retention in
+persistent logs.</p>
+<hr />
+<h2 id="current-state-assessment">1. Current State Assessment</h2>
+<h3 id="deepteam-c-integration">1.1 DeepTeam (C:-integration)</h3>
+<p><strong>Version:</strong> 1.0.9 (Python package)<br />
+<strong>Architecture:</strong> Modular red teaming framework built on
+DeepEval</p>
+<p><strong>Strengths:</strong> - <strong>Comprehensive
+coverage:</strong> 50+ vulnerability types across Data Privacy,
+Responsible AI, Security, Safety, Business, and Agentic categories -
+<strong>Rich attack library:</strong> 20+ single-turn and multi-turn
+adversarial attacks (Prompt Injection, Roleplay, Jailbreaking
+techniques, Crescendo, Tree Jailbreaking, Linear Jailbreaking) -
+<strong>Framework support:</strong> Built-in mappings for OWASP Top 10
+for LLMs (2025), OWASP Top 10 for Agents (2026), NIST AI RMF, MITRE
+ATLAS, BeaverTails, Aegis - <strong>Flexible execution:</strong>
+Synchronous and asynchronous modes with configurable concurrency
+(<code>max_concurrent</code>), bounded multi-turn support, and
+per-vulnerability attack counts - <strong>Pluggable models:</strong>
+Works with any LLM via DeepEval’s model abstraction (supports OpenAI,
+Azure OpenAI, custom providers) - <strong>Production
+guardrails:</strong> 7 built-in guardrails (Toxicity, Prompt Injection,
+Privacy, Illegal Activity, Hallucination, Topical, Cybersecurity) -
+<strong>CLI support:</strong> Can be driven via CLI with YAML configs
+for CI integration - <strong>Local-first:</strong> Runs entirely on your
+infrastructure; optional telemetry can be disabled via
+<code>DEEPEVAL_UPDATE_WARNING_OPT_OUT</code></p>
+<p><strong>Key APIs:</strong> - <code>deepteam.red_team()</code> -
+High-level API for running red teaming assessments -
+<code>RedTeamer</code> class - Core orchestration with fine-grained
+control - <code>AttackSimulator</code> - Handles attack generation and
+enhancement (single/multi-turn) - <code>Guardrails</code> - Runtime
+input/output protection</p>
+<h3 id="secmate-c-integration">1.2 SecMate (C:-integration)</h3>
+<p><strong>Type:</strong> React + TypeScript frontend prototype
+(Vite)<br />
+<strong>Status:</strong> Frontend review prototype with mock services;
+no backend implementation</p>
+<p><strong>Strengths:</strong> - <strong>Well-documented
+requirements:</strong> Comprehensive TRDs (TRD-1, TRD-2, TRD-2A) define
+architecture, threat model, data contracts, and safety requirements -
+<strong>Action-space primacy:</strong> Correctly identifies
+tool/API/function call layer as primary security boundary (not just
+text) - <strong>Dual-stage verification philosophy:</strong> Explicitly
+requires deterministic policy checks before semantic LLM judging -
+<strong>Fail-closed design:</strong> Assessment failures must never be
+reported as passes; release enforcement remains advisory -
+<strong>Strong safety posture:</strong> Zero credential retention in
+persistent logs, sandboxing requirements for mutating tools, redaction
+requirements - <strong>Typed contracts:</strong> Well-defined TypeScript
+types (Target, Assessment, Finding, Report, ModelProfile) aligned with
+TRD schemas - <strong>Complete UI:</strong> Executive dashboard, Target
+onboarding, Assessment planning, Findings triage, Reports - all
+functional with mock data - <strong>Internal-use focus:</strong>
+Explicitly scoped to Paramount internal AI agents only</p>
+<p><strong>Gaps:</strong> - No backend/orchestration service - No real
+model integration (all Azure OpenAI profiles are demo fixtures) - No
+target gateway or action-space interceptor - No deterministic policy
+engine - No audit serialization with redaction - No CI/CD CLI runner
+(advisory CLI mentioned in TRDs) - No actual assessment execution (all
+results are simulated)</p>
+<hr />
+<h2 id="integration-architecture">2. Integration Architecture</h2>
+<p>The integration will follow SecMate’s intended architecture with
+DeepTeam serving as the red teaming engine within the orchestration
+broker.</p>
+<h3 id="target-architecture">2.1 Target Architecture</h3>
+<pre class="text"><code>┌─────────────────────────────────────────────────────────────────────────┐
+│                            SecMate Web (React + Vite)                     │
+│  Dashboard | Targets | Assessments | Findings | Reports                   │
+└─────────────────────────────────┬─────────────────────────────────────────┘
+                                  │ REST API (JSON)
+                                  ▼
+┌─────────────────────────────────────────────────────────────────────────┐
+│                      SecMate API (FastAPI - New Backend)                  │
+├─────────────────────────────────────────────────────────────────────────┤
+│  ┌─────────────────────┐  ┌─────────────────────────┐  ┌─────────────────┐ │
+│  │ Orchestration Broker │  │  DeepTeam Orchestrator   │  │ Audit Serializer│ │
+│  │ - State management   │  │  - Wraps deepteam.red_team│  │ - Immutable     │ │
+│  │ - Routing/correlation│  │  - Maps RTTestCase→Finding│  │ - Redaction     │ │
+│  │ - Budgets/timeouts   │  │  - Framework selection   │  │ - SARIF/JSON    │ │
+│  │ - Rate limiting      │  │  - Progress tracking     │  │ - JUnit (future)│ │
+│  └──────────┬──────────┘  └───────────┬─────────────┘  └─────────┬─────┘ │
+│             │                          │                          │         │
+│             ▼                          ▼                          ▼         │
+│  ┌────────────────────────────────────────────────────────────────────────┐│
+│  │                    Target Gateway &amp; Action-Space Interceptor           ││
+│  │  - Tool-category scoping (read_only|containment|mutation|admin)       ││
+│  │  - Deterministic policy checks (PRE/POST semantic judge)              ││
+│  │  - Mock/Sandbox routing for mutating tools                            ││
+│  │  - Correlation IDs (X-Assessment-ID, X-Session-ID, X-Caller-Role)    ││
+│  │  - Timeout enforcement, token budgets                                 ││
+│  └─────────────────────────────┬──────────────────────────────────────────┘│
+└─────────────────────────────────┼──────────────────────────────────────────┘
+                                  │ Model Callback (async)
+                                  ▼
+                        ┌─────────────────────────────────┐
+                        │        DeepTeam Engine            │
+                        │  vulnerabilities | attacks        │
+                        │  AttackSimulator | RedTeamer      │
+                        │  metrics (LLM-as-judge)           │
+                        └───────────────┬───────────────────┘
+                                        │ Calls Target Agent
+                                        ▼
+                                  ┌───────────────────┐
+                                  │ Target Agent (SUT) │
+                                  │ (via gateway only)│
+                                  └───────────────────┘</code></pre>
+<h3 id="data-mapping">2.2 Data Mapping</h3>
+<p>DeepTeam’s internal types must be transformed to SecMate’s contract
+types to maintain UI compatibility.</p>
+<table>
+<colgroup>
+<col style="width: 33%" />
+<col style="width: 33%" />
+<col style="width: 33%" />
+</colgroup>
+<thead>
+<tr>
+<th>DeepTeam Concept</th>
+<th>SecMate Concept</th>
+<th>Notes</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>RTTestCase</code></td>
+<td><code>Finding</code></td>
+<td>Map <code>vulnerability</code>, <code>vulnerability_type</code>,
+<code>input</code>, <code>turns</code>, <code>actual_output</code>,
+<code>score</code>, <code>reason</code>, <code>error</code>,
+<code>evaluation_cost</code>, <code>simulation_cost</code> to evidence
+fields</td>
+</tr>
+<tr>
+<td><code>RiskAssessment</code> (overview + test_cases)</td>
+<td><code>Assessment</code> + <code>Findings[]</code> +
+<code>Report</code></td>
+<td>Aggregate test cases by target/assessment; compute advisory result
+based on severities</td>
+</tr>
+<tr>
+<td><code>VulnerabilityType</code> / Attack</td>
+<td><code>standards[]</code></td>
+<td>Map to OWASP/MITRE ATLAS references (e.g., OWASP LLM06, MITRE ATLAS
+AML.T0054)</td>
+</tr>
+<tr>
+<td>Multi-turn <code>RTTurn[]</code></td>
+<td>Evidence bundle</td>
+<td>Store full turn history (probe → response) for replay</td>
+</tr>
+<tr>
+<td>Metric verdict (score/reason)</td>
+<td><code>oracleResult</code>, <code>judgeRationale</code></td>
+<td>Distinguish deterministic oracle vs semantic judge</td>
+</tr>
+</tbody>
+</table>
+<p><strong>Example Finding mapping:</strong> - <code>title</code> →
+Derived from vulnerability name + attack method - <code>severity</code>
+→ Map from CVSS/DeepTeam risk level to CRITICAL/HIGH/MEDIUM/LOW -
+<code>evidence</code> → Concatenate turns, tool calls intercepted,
+timestamps - <code>toolAttempt</code> → Intercepted tool call (name +
+args) from gateway - <code>oracleResult</code> → Deterministic policy
+engine result (DENY/PASS with rule_id) - <code>judgeRationale</code> →
+DeepTeam metric reason/justification - <code>confidence</code> → From
+DeepTeam score/metric confidence - <code>standards</code> → Mapped
+framework categories</p>
+<hr />
+<h2 id="integration-procedures-step-by-step">3. Integration Procedures
+(Step-by-Step)</h2>
+<h3 id="prerequisites">3.1 Prerequisites</h3>
+<p><strong>System Requirements:</strong> - Windows 11 (current
+environment: win32) - Node.js 18+ and npm (for frontend) - Python 3.9 -
+3.14 - Git - Access to LLM provider (OpenAI/Azure OpenAI) with API keys
+- Isolated test environment for target agents (never production)</p>
+<p><strong>Environment Setup:</strong></p>
+<div class="sourceCode" id="cb2"><pre
+class="sourceCode bash"><code class="sourceCode bash"><span id="cb2-1"><a href="#cb2-1" aria-hidden="true" tabindex="-1"></a><span class="co"># Set environment variables (backend)</span></span>
+<span id="cb2-2"><a href="#cb2-2" aria-hidden="true" tabindex="-1"></a><span class="bu">set</span> DEEPEVAL_UPDATE_WARNING_OPT_OUT=YES</span>
+<span id="cb2-3"><a href="#cb2-3" aria-hidden="true" tabindex="-1"></a><span class="bu">set</span> OPENAI_API_KEY=<span class="op">&lt;</span>your-key<span class="op">&gt;</span></span>
+<span id="cb2-4"><a href="#cb2-4" aria-hidden="true" tabindex="-1"></a><span class="bu">set</span> AZURE_OPENAI_API_KEY=<span class="op">&lt;</span>your-key<span class="op">&gt;</span></span>
+<span id="cb2-5"><a href="#cb2-5" aria-hidden="true" tabindex="-1"></a><span class="bu">set</span> AZURE_OPENAI_ENDPOINT=<span class="op">&lt;</span>your-endpoint<span class="op">&gt;</span></span>
+<span id="cb2-6"><a href="#cb2-6" aria-hidden="true" tabindex="-1"></a><span class="bu">set</span> SIMULATOR_MODEL=gpt-4o-mini</span>
+<span id="cb2-7"><a href="#cb2-7" aria-hidden="true" tabindex="-1"></a><span class="bu">set</span> EVALUATION_MODEL=gpt-4o-mini</span>
+<span id="cb2-8"><a href="#cb2-8" aria-hidden="true" tabindex="-1"></a><span class="bu">set</span> SANDBOX_MODE=true</span>
+<span id="cb2-9"><a href="#cb2-9" aria-hidden="true" tabindex="-1"></a><span class="bu">set</span> MAX_CONCURRENT=5</span>
+<span id="cb2-10"><a href="#cb2-10" aria-hidden="true" tabindex="-1"></a><span class="bu">set</span> TIMEOUT_SECONDS=120</span></code></pre></div>
+<h3 id="step-1-install-dependencies">3.2 Step 1: Install
+Dependencies</h3>
+<p><strong>DeepTeam (already present):</strong> Installed at
+<code>C:\paramount\paramount-integration\deepteam</code><br />
+Verify:</p>
+<div class="sourceCode" id="cb3"><pre
+class="sourceCode bash"><code class="sourceCode bash"><span id="cb3-1"><a href="#cb3-1" aria-hidden="true" tabindex="-1"></a><span class="bu">cd</span> C:<span class="dt">\p</span>aramount<span class="dt">\p</span>aramount-integration<span class="dt">\d</span>eepteam</span>
+<span id="cb3-2"><a href="#cb3-2" aria-hidden="true" tabindex="-1"></a><span class="ex">pip</span> show deepteam</span>
+<span id="cb3-3"><a href="#cb3-3" aria-hidden="true" tabindex="-1"></a><span class="co"># or</span></span>
+<span id="cb3-4"><a href="#cb3-4" aria-hidden="true" tabindex="-1"></a><span class="ex">python</span> <span class="at">-c</span> <span class="st">&quot;import deepteam; print(deepteam.__version__)&quot;</span></span></code></pre></div>
+<p><strong>Frontend (already present):</strong> At
+<code>C:\paramount\paramount-integration\secmate\apps\web</code><br />
+Verify:</p>
+<div class="sourceCode" id="cb4"><pre
+class="sourceCode bash"><code class="sourceCode bash"><span id="cb4-1"><a href="#cb4-1" aria-hidden="true" tabindex="-1"></a><span class="bu">cd</span> C:<span class="dt">\p</span>aramount<span class="dt">\p</span>aramount-integration<span class="dt">\s</span>ecmate<span class="dt">\a</span>pps<span class="dt">\w</span>eb</span>
+<span id="cb4-2"><a href="#cb4-2" aria-hidden="true" tabindex="-1"></a><span class="ex">npm</span> <span class="at">--version</span></span></code></pre></div>
+<h3 id="step-2-create-secmate-backend-api">3.3 Step 2: Create SecMate
+Backend API</h3>
+<p>Create a new API application under <code>secmate/apps/api</code>.</p>
+<p><strong>Directory structure:</strong></p>
+<pre class="text"><code>secmate/apps/api/
+├── pyproject.toml (or requirements.txt)
+├── .env.example
+├── src/
+│   ├── __init__.py
+│   ├── main.py
+│   ├── config.py
+│   ├── schemas/           # Pydantic models matching TS contracts
+│   │   ├── target.py
+│   │   ├── assessment.py
+│   │   ├── finding.py
+│   │   └── report.py
+│   ├── routers/
+│   │   ├── targets.py
+│   │   ├── assessments.py
+│   │   ├── findings.py
+│   │   └── reports.py
+│   ├── services/
+│   │   ├── deepteam_orchestrator.py
+│   │   ├── target_gateway.py
+│   │   ├── policy_engine.py
+│   │   └── audit_serializer.py
+│   ├── adapters/
+│   │   └── deepteam_mapper.py
+│   └── utils/
+│       ├── redaction.py
+│       └── ids.py
+└── tests/</code></pre>
+<p><strong>Create requirements.txt:</strong></p>
+<div class="sourceCode" id="cb6"><pre
+class="sourceCode txt"><code class="sourceCode default"><span id="cb6-1"><a href="#cb6-1" aria-hidden="true" tabindex="-1"></a>fastapi==0.115.4</span>
+<span id="cb6-2"><a href="#cb6-2" aria-hidden="true" tabindex="-1"></a>uvicorn[standard]==0.32.0</span>
+<span id="cb6-3"><a href="#cb6-3" aria-hidden="true" tabindex="-1"></a>pydantic==2.9.2</span>
+<span id="cb6-4"><a href="#cb6-4" aria-hidden="true" tabindex="-1"></a>pydantic-settings==2.6.1</span>
+<span id="cb6-5"><a href="#cb6-5" aria-hidden="true" tabindex="-1"></a>httpx==0.27.2</span>
+<span id="cb6-6"><a href="#cb6-6" aria-hidden="true" tabindex="-1"></a>python-multipart==0.0.17</span>
+<span id="cb6-7"><a href="#cb6-7" aria-hidden="true" tabindex="-1"></a>deepteam==1.0.9</span>
+<span id="cb6-8"><a href="#cb6-8" aria-hidden="true" tabindex="-1"></a>deepeval&gt;=3.6.2</span>
+<span id="cb6-9"><a href="#cb6-9" aria-hidden="true" tabindex="-1"></a>rich==13.9.4</span>
+<span id="cb6-10"><a href="#cb6-10" aria-hidden="true" tabindex="-1"></a>pyyaml==6.0.2</span>
+<span id="cb6-11"><a href="#cb6-11" aria-hidden="true" tabindex="-1"></a>sse-starlette==2.1.3</span></code></pre></div>
+<h3 id="step-3-implement-configuration">3.4 Step 3: Implement
+Configuration</h3>
+<p><strong>src/config.py:</strong></p>
+<div class="sourceCode" id="cb7"><pre
+class="sourceCode python"><code class="sourceCode python"><span id="cb7-1"><a href="#cb7-1" aria-hidden="true" tabindex="-1"></a><span class="im">from</span> pydantic_settings <span class="im">import</span> BaseSettings</span>
+<span id="cb7-2"><a href="#cb7-2" aria-hidden="true" tabindex="-1"></a><span class="im">from</span> typing <span class="im">import</span> Optional</span>
+<span id="cb7-3"><a href="#cb7-3" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb7-4"><a href="#cb7-4" aria-hidden="true" tabindex="-1"></a><span class="kw">class</span> Settings(BaseSettings):</span>
+<span id="cb7-5"><a href="#cb7-5" aria-hidden="true" tabindex="-1"></a>    app_name: <span class="bu">str</span> <span class="op">=</span> <span class="st">&quot;SecMate API&quot;</span></span>
+<span id="cb7-6"><a href="#cb7-6" aria-hidden="true" tabindex="-1"></a>    environment: <span class="bu">str</span> <span class="op">=</span> <span class="st">&quot;dev&quot;</span></span>
+<span id="cb7-7"><a href="#cb7-7" aria-hidden="true" tabindex="-1"></a>    sandbox_mode: <span class="bu">bool</span> <span class="op">=</span> <span class="va">True</span></span>
+<span id="cb7-8"><a href="#cb7-8" aria-hidden="true" tabindex="-1"></a>    simulator_model: <span class="bu">str</span> <span class="op">=</span> <span class="st">&quot;gpt-4o-mini&quot;</span></span>
+<span id="cb7-9"><a href="#cb7-9" aria-hidden="true" tabindex="-1"></a>    evaluation_model: <span class="bu">str</span> <span class="op">=</span> <span class="st">&quot;gpt-4o-mini&quot;</span></span>
+<span id="cb7-10"><a href="#cb7-10" aria-hidden="true" tabindex="-1"></a>    max_concurrent: <span class="bu">int</span> <span class="op">=</span> <span class="dv">5</span></span>
+<span id="cb7-11"><a href="#cb7-11" aria-hidden="true" tabindex="-1"></a>    timeout_seconds: <span class="bu">int</span> <span class="op">=</span> <span class="dv">120</span></span>
+<span id="cb7-12"><a href="#cb7-12" aria-hidden="true" tabindex="-1"></a>    attacks_per_vulnerability_type: <span class="bu">int</span> <span class="op">=</span> <span class="dv">1</span></span>
+<span id="cb7-13"><a href="#cb7-13" aria-hidden="true" tabindex="-1"></a>    max_turns: <span class="bu">int</span> <span class="op">=</span> <span class="dv">5</span></span>
+<span id="cb7-14"><a href="#cb7-14" aria-hidden="true" tabindex="-1"></a>    token_budget: <span class="bu">int</span> <span class="op">=</span> <span class="dv">12000</span></span>
+<span id="cb7-15"><a href="#cb7-15" aria-hidden="true" tabindex="-1"></a>    redact_secrets: <span class="bu">bool</span> <span class="op">=</span> <span class="va">True</span></span>
+<span id="cb7-16"><a href="#cb7-16" aria-hidden="true" tabindex="-1"></a>    fail_closed: <span class="bu">bool</span> <span class="op">=</span> <span class="va">True</span></span>
+<span id="cb7-17"><a href="#cb7-17" aria-hidden="true" tabindex="-1"></a>    cors_origins: <span class="bu">list</span>[<span class="bu">str</span>] <span class="op">=</span> [<span class="st">&quot;http://localhost:5173&quot;</span>]</span>
+<span id="cb7-18"><a href="#cb7-18" aria-hidden="true" tabindex="-1"></a>    </span>
+<span id="cb7-19"><a href="#cb7-19" aria-hidden="true" tabindex="-1"></a>    <span class="kw">class</span> Config:</span>
+<span id="cb7-20"><a href="#cb7-20" aria-hidden="true" tabindex="-1"></a>        env_file <span class="op">=</span> <span class="st">&quot;.env&quot;</span></span>
+<span id="cb7-21"><a href="#cb7-21" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb7-22"><a href="#cb7-22" aria-hidden="true" tabindex="-1"></a>settings <span class="op">=</span> Settings()</span></code></pre></div>
+<h3 id="step-4-implement-target-gateway-action-space-interceptor">3.5
+Step 4: Implement Target Gateway (Action-Space Interceptor)</h3>
+<p>The Target Gateway is critical per TRD requirements. It must
+intercept tool calls, enforce category scoping, and route to
+sandbox/mock.</p>
+<p><strong>src/services/policy_engine.py</strong> (deterministic
+checks):</p>
+<div class="sourceCode" id="cb8"><pre
+class="sourceCode python"><code class="sourceCode python"><span id="cb8-1"><a href="#cb8-1" aria-hidden="true" tabindex="-1"></a><span class="im">from</span> typing <span class="im">import</span> Dict, List, Any</span>
+<span id="cb8-2"><a href="#cb8-2" aria-hidden="true" tabindex="-1"></a><span class="im">from</span> enum <span class="im">import</span> Enum</span>
+<span id="cb8-3"><a href="#cb8-3" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb8-4"><a href="#cb8-4" aria-hidden="true" tabindex="-1"></a><span class="kw">class</span> ToolCategory(<span class="bu">str</span>, Enum):</span>
+<span id="cb8-5"><a href="#cb8-5" aria-hidden="true" tabindex="-1"></a>    READ_ONLY <span class="op">=</span> <span class="st">&quot;read_only&quot;</span></span>
+<span id="cb8-6"><a href="#cb8-6" aria-hidden="true" tabindex="-1"></a>    CONTAINMENT <span class="op">=</span> <span class="st">&quot;containment&quot;</span></span>
+<span id="cb8-7"><a href="#cb8-7" aria-hidden="true" tabindex="-1"></a>    MUTATION <span class="op">=</span> <span class="st">&quot;mutation&quot;</span></span>
+<span id="cb8-8"><a href="#cb8-8" aria-hidden="true" tabindex="-1"></a>    ADMINISTRATIVE <span class="op">=</span> <span class="st">&quot;administrative&quot;</span></span>
+<span id="cb8-9"><a href="#cb8-9" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb8-10"><a href="#cb8-10" aria-hidden="true" tabindex="-1"></a><span class="kw">class</span> PolicyVerdict:</span>
+<span id="cb8-11"><a href="#cb8-11" aria-hidden="true" tabindex="-1"></a>    <span class="kw">def</span> <span class="fu">__init__</span>(<span class="va">self</span>, allowed: <span class="bu">bool</span>, rule_id: <span class="bu">str</span>, message: <span class="bu">str</span>, severity: <span class="bu">str</span> <span class="op">=</span> <span class="st">&quot;MEDIUM&quot;</span>):</span>
+<span id="cb8-12"><a href="#cb8-12" aria-hidden="true" tabindex="-1"></a>        <span class="va">self</span>.allowed <span class="op">=</span> allowed</span>
+<span id="cb8-13"><a href="#cb8-13" aria-hidden="true" tabindex="-1"></a>        <span class="va">self</span>.rule_id <span class="op">=</span> rule_id</span>
+<span id="cb8-14"><a href="#cb8-14" aria-hidden="true" tabindex="-1"></a>        <span class="va">self</span>.message <span class="op">=</span> message</span>
+<span id="cb8-15"><a href="#cb8-15" aria-hidden="true" tabindex="-1"></a>        <span class="va">self</span>.severity <span class="op">=</span> severity</span>
+<span id="cb8-16"><a href="#cb8-16" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb8-17"><a href="#cb8-17" aria-hidden="true" tabindex="-1"></a><span class="kw">class</span> DeterministicPolicyEngine:</span>
+<span id="cb8-18"><a href="#cb8-18" aria-hidden="true" tabindex="-1"></a>    <span class="co">&quot;&quot;&quot;Tool-category scoped deterministic checks - runs BEFORE semantic judge.&quot;&quot;&quot;</span></span>
+<span id="cb8-19"><a href="#cb8-19" aria-hidden="true" tabindex="-1"></a>    <span class="kw">def</span> check_tool_call(<span class="va">self</span>, tool_name: <span class="bu">str</span>, args: Dict, category: ToolCategory, </span>
+<span id="cb8-20"><a href="#cb8-20" aria-hidden="true" tabindex="-1"></a>                       session_context: Dict) <span class="op">-&gt;</span> PolicyVerdict:</span>
+<span id="cb8-21"><a href="#cb8-21" aria-hidden="true" tabindex="-1"></a>        <span class="co"># Implement category-specific rules</span></span>
+<span id="cb8-22"><a href="#cb8-22" aria-hidden="true" tabindex="-1"></a>        <span class="co"># Example: containment requires elevated role + in-scope</span></span>
+<span id="cb8-23"><a href="#cb8-23" aria-hidden="true" tabindex="-1"></a>        <span class="cf">if</span> category <span class="op">==</span> ToolCategory.CONTAINMENT:</span>
+<span id="cb8-24"><a href="#cb8-24" aria-hidden="true" tabindex="-1"></a>            <span class="cf">if</span> session_context.get(<span class="st">&quot;role&quot;</span>) <span class="op">!=</span> <span class="st">&quot;tier3&quot;</span> <span class="kw">or</span> <span class="kw">not</span> session_context.get(<span class="st">&quot;incident_scope&quot;</span>):</span>
+<span id="cb8-25"><a href="#cb8-25" aria-hidden="true" tabindex="-1"></a>                <span class="cf">return</span> PolicyVerdict(<span class="va">False</span>, <span class="st">&quot;POL-CONT-001&quot;</span>, </span>
+<span id="cb8-26"><a href="#cb8-26" aria-hidden="true" tabindex="-1"></a>                                   <span class="st">&quot;Containment requires Tier-3 role and in-scope incident&quot;</span>)</span>
+<span id="cb8-27"><a href="#cb8-27" aria-hidden="true" tabindex="-1"></a>        <span class="co"># Add more rules per TRD</span></span>
+<span id="cb8-28"><a href="#cb8-28" aria-hidden="true" tabindex="-1"></a>        <span class="cf">return</span> PolicyVerdict(<span class="va">True</span>, <span class="st">&quot;POL-OK&quot;</span>, <span class="st">&quot;Allowed&quot;</span>)</span></code></pre></div>
+<p><strong>src/services/target_gateway.py:</strong></p>
+<div class="sourceCode" id="cb9"><pre
+class="sourceCode python"><code class="sourceCode python"><span id="cb9-1"><a href="#cb9-1" aria-hidden="true" tabindex="-1"></a><span class="im">import</span> asyncio</span>
+<span id="cb9-2"><a href="#cb9-2" aria-hidden="true" tabindex="-1"></a><span class="im">import</span> time</span>
+<span id="cb9-3"><a href="#cb9-3" aria-hidden="true" tabindex="-1"></a><span class="im">from</span> typing <span class="im">import</span> Dict, Any, Optional</span>
+<span id="cb9-4"><a href="#cb9-4" aria-hidden="true" tabindex="-1"></a><span class="im">import</span> uuid</span>
+<span id="cb9-5"><a href="#cb9-5" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb9-6"><a href="#cb9-6" aria-hidden="true" tabindex="-1"></a><span class="kw">class</span> TargetGateway:</span>
+<span id="cb9-7"><a href="#cb9-7" aria-hidden="true" tabindex="-1"></a>    <span class="co">&quot;&quot;&quot;Broker-owned gateway for target agent calls.&quot;&quot;&quot;</span></span>
+<span id="cb9-8"><a href="#cb9-8" aria-hidden="true" tabindex="-1"></a>    <span class="kw">def</span> <span class="fu">__init__</span>(<span class="va">self</span>, policy_engine, sandbox_mode: <span class="bu">bool</span> <span class="op">=</span> <span class="va">True</span>):</span>
+<span id="cb9-9"><a href="#cb9-9" aria-hidden="true" tabindex="-1"></a>        <span class="va">self</span>.policy_engine <span class="op">=</span> policy_engine</span>
+<span id="cb9-10"><a href="#cb9-10" aria-hidden="true" tabindex="-1"></a>        <span class="va">self</span>.sandbox_mode <span class="op">=</span> sandbox_mode</span>
+<span id="cb9-11"><a href="#cb9-11" aria-hidden="true" tabindex="-1"></a>        <span class="va">self</span>.correlation_id <span class="op">=</span> <span class="va">None</span></span>
+<span id="cb9-12"><a href="#cb9-12" aria-hidden="true" tabindex="-1"></a>        </span>
+<span id="cb9-13"><a href="#cb9-13" aria-hidden="true" tabindex="-1"></a>    <span class="cf">async</span> <span class="kw">def</span> call(<span class="va">self</span>, input_str: <span class="bu">str</span>, assessment_config: Dict, </span>
+<span id="cb9-14"><a href="#cb9-14" aria-hidden="true" tabindex="-1"></a>                   turn_history: <span class="bu">list</span> <span class="op">=</span> <span class="va">None</span>) <span class="op">-&gt;</span> <span class="bu">str</span>:</span>
+<span id="cb9-15"><a href="#cb9-15" aria-hidden="true" tabindex="-1"></a>        correlation_id <span class="op">=</span> <span class="bu">str</span>(uuid.uuid4())</span>
+<span id="cb9-16"><a href="#cb9-16" aria-hidden="true" tabindex="-1"></a>        <span class="va">self</span>.correlation_id <span class="op">=</span> correlation_id</span>
+<span id="cb9-17"><a href="#cb9-17" aria-hidden="true" tabindex="-1"></a>        <span class="co"># 1. Parse potential tool calls (if model indicates tool use)</span></span>
+<span id="cb9-18"><a href="#cb9-18" aria-hidden="true" tabindex="-1"></a>        <span class="co"># 2. Run deterministic policy checks on tool calls</span></span>
+<span id="cb9-19"><a href="#cb9-19" aria-hidden="true" tabindex="-1"></a>        <span class="co"># 3. Route to sandbox/mock if mutating; never prod</span></span>
+<span id="cb9-20"><a href="#cb9-20" aria-hidden="true" tabindex="-1"></a>        <span class="co"># 4. Enforce timeouts, budgets</span></span>
+<span id="cb9-21"><a href="#cb9-21" aria-hidden="true" tabindex="-1"></a>        <span class="co"># 5. Return response with telemetry</span></span>
+<span id="cb9-22"><a href="#cb9-22" aria-hidden="true" tabindex="-1"></a>        <span class="co"># For demo: delegate to wrapped target</span></span>
+<span id="cb9-23"><a href="#cb9-23" aria-hidden="true" tabindex="-1"></a>        <span class="cf">pass</span></span></code></pre></div>
+<h3 id="step-5-implement-deepteam-orchestrator">3.6 Step 5: Implement
+DeepTeam Orchestrator</h3>
+<p><strong>src/services/deepteam_orchestrator.py:</strong></p>
+<div class="sourceCode" id="cb10"><pre
+class="sourceCode python"><code class="sourceCode python"><span id="cb10-1"><a href="#cb10-1" aria-hidden="true" tabindex="-1"></a><span class="im">import</span> asyncio</span>
+<span id="cb10-2"><a href="#cb10-2" aria-hidden="true" tabindex="-1"></a><span class="im">from</span> typing <span class="im">import</span> Dict, Any, Optional, List</span>
+<span id="cb10-3"><a href="#cb10-3" aria-hidden="true" tabindex="-1"></a><span class="im">from</span> deepteam <span class="im">import</span> red_team</span>
+<span id="cb10-4"><a href="#cb10-4" aria-hidden="true" tabindex="-1"></a><span class="im">from</span> deepteam.frameworks <span class="im">import</span> OWASPTop10, MITRE, OWASP_ASI_2026</span>
+<span id="cb10-5"><a href="#cb10-5" aria-hidden="true" tabindex="-1"></a><span class="im">from</span> deepteam.red_teamer <span class="im">import</span> RiskAssessment</span>
+<span id="cb10-6"><a href="#cb10-6" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb10-7"><a href="#cb10-7" aria-hidden="true" tabindex="-1"></a><span class="im">from</span> src.config <span class="im">import</span> settings</span>
+<span id="cb10-8"><a href="#cb10-8" aria-hidden="true" tabindex="-1"></a><span class="im">from</span> src.adapters.deepteam_mapper <span class="im">import</span> DeepTeamMapper</span>
+<span id="cb10-9"><a href="#cb10-9" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb10-10"><a href="#cb10-10" aria-hidden="true" tabindex="-1"></a><span class="kw">class</span> DeepTeamOrchestrator:</span>
+<span id="cb10-11"><a href="#cb10-11" aria-hidden="true" tabindex="-1"></a>    <span class="kw">def</span> <span class="fu">__init__</span>(<span class="va">self</span>, target_gateway, mapper: DeepTeamMapper):</span>
+<span id="cb10-12"><a href="#cb10-12" aria-hidden="true" tabindex="-1"></a>        <span class="va">self</span>.target_gateway <span class="op">=</span> target_gateway</span>
+<span id="cb10-13"><a href="#cb10-13" aria-hidden="true" tabindex="-1"></a>        <span class="va">self</span>.mapper <span class="op">=</span> mapper</span>
+<span id="cb10-14"><a href="#cb10-14" aria-hidden="true" tabindex="-1"></a>        <span class="va">self</span>.framework_map <span class="op">=</span> {</span>
+<span id="cb10-15"><a href="#cb10-15" aria-hidden="true" tabindex="-1"></a>            <span class="st">&quot;OWASPTop10&quot;</span>: OWASPTop10,</span>
+<span id="cb10-16"><a href="#cb10-16" aria-hidden="true" tabindex="-1"></a>            <span class="st">&quot;MITRE&quot;</span>: MITRE,</span>
+<span id="cb10-17"><a href="#cb10-17" aria-hidden="true" tabindex="-1"></a>            <span class="st">&quot;OWASP_ASI_2026&quot;</span>: OWASP_ASI_2026,</span>
+<span id="cb10-18"><a href="#cb10-18" aria-hidden="true" tabindex="-1"></a>        }</span>
+<span id="cb10-19"><a href="#cb10-19" aria-hidden="true" tabindex="-1"></a>        </span>
+<span id="cb10-20"><a href="#cb10-20" aria-hidden="true" tabindex="-1"></a>    <span class="cf">async</span> <span class="kw">def</span> run_assessment(<span class="va">self</span>, config: Dict[<span class="bu">str</span>, Any]) <span class="op">-&gt;</span> Dict:</span>
+<span id="cb10-21"><a href="#cb10-21" aria-hidden="true" tabindex="-1"></a>        <span class="co">&quot;&quot;&quot;Execute red teaming assessment via DeepTeam.&quot;&quot;&quot;</span></span>
+<span id="cb10-22"><a href="#cb10-22" aria-hidden="true" tabindex="-1"></a>        framework_name <span class="op">=</span> config.get(<span class="st">&quot;framework&quot;</span>, <span class="st">&quot;OWASPTop10&quot;</span>)</span>
+<span id="cb10-23"><a href="#cb10-23" aria-hidden="true" tabindex="-1"></a>        FrameworkCls <span class="op">=</span> <span class="va">self</span>.framework_map.get(framework_name, OWASPTop10)</span>
+<span id="cb10-24"><a href="#cb10-24" aria-hidden="true" tabindex="-1"></a>        framework <span class="op">=</span> FrameworkCls()</span>
+<span id="cb10-25"><a href="#cb10-25" aria-hidden="true" tabindex="-1"></a>        </span>
+<span id="cb10-26"><a href="#cb10-26" aria-hidden="true" tabindex="-1"></a>        <span class="co"># Build async callback that goes through gateway</span></span>
+<span id="cb10-27"><a href="#cb10-27" aria-hidden="true" tabindex="-1"></a>        <span class="cf">async</span> <span class="kw">def</span> model_callback(input_str: <span class="bu">str</span>) <span class="op">-&gt;</span> <span class="bu">str</span>:</span>
+<span id="cb10-28"><a href="#cb10-28" aria-hidden="true" tabindex="-1"></a>            <span class="cf">return</span> <span class="cf">await</span> <span class="va">self</span>.target_gateway.call(</span>
+<span id="cb10-29"><a href="#cb10-29" aria-hidden="true" tabindex="-1"></a>                input_str<span class="op">=</span>input_str,</span>
+<span id="cb10-30"><a href="#cb10-30" aria-hidden="true" tabindex="-1"></a>                assessment_config<span class="op">=</span>config</span>
+<span id="cb10-31"><a href="#cb10-31" aria-hidden="true" tabindex="-1"></a>            )</span>
+<span id="cb10-32"><a href="#cb10-32" aria-hidden="true" tabindex="-1"></a>        </span>
+<span id="cb10-33"><a href="#cb10-33" aria-hidden="true" tabindex="-1"></a>        <span class="co"># Run red teaming</span></span>
+<span id="cb10-34"><a href="#cb10-34" aria-hidden="true" tabindex="-1"></a>        risk_assessment: RiskAssessment <span class="op">=</span> red_team(</span>
+<span id="cb10-35"><a href="#cb10-35" aria-hidden="true" tabindex="-1"></a>            model_callback<span class="op">=</span>model_callback,</span>
+<span id="cb10-36"><a href="#cb10-36" aria-hidden="true" tabindex="-1"></a>            framework<span class="op">=</span>framework,</span>
+<span id="cb10-37"><a href="#cb10-37" aria-hidden="true" tabindex="-1"></a>            simulator_model<span class="op">=</span>config.get(<span class="st">&quot;simulator_model&quot;</span>, settings.simulator_model),</span>
+<span id="cb10-38"><a href="#cb10-38" aria-hidden="true" tabindex="-1"></a>            evaluation_model<span class="op">=</span>config.get(<span class="st">&quot;evaluation_model&quot;</span>, settings.evaluation_model),</span>
+<span id="cb10-39"><a href="#cb10-39" aria-hidden="true" tabindex="-1"></a>            attacks_per_vulnerability_type<span class="op">=</span>config.get(</span>
+<span id="cb10-40"><a href="#cb10-40" aria-hidden="true" tabindex="-1"></a>                <span class="st">&quot;attacks_per_vulnerability_type&quot;</span>, </span>
+<span id="cb10-41"><a href="#cb10-41" aria-hidden="true" tabindex="-1"></a>                settings.attacks_per_vulnerability_type</span>
+<span id="cb10-42"><a href="#cb10-42" aria-hidden="true" tabindex="-1"></a>            ),</span>
+<span id="cb10-43"><a href="#cb10-43" aria-hidden="true" tabindex="-1"></a>            async_mode<span class="op">=</span><span class="va">True</span>,</span>
+<span id="cb10-44"><a href="#cb10-44" aria-hidden="true" tabindex="-1"></a>            max_concurrent<span class="op">=</span>config.get(<span class="st">&quot;max_concurrent&quot;</span>, settings.max_concurrent),</span>
+<span id="cb10-45"><a href="#cb10-45" aria-hidden="true" tabindex="-1"></a>            ignore_errors<span class="op">=</span>settings.fail_closed <span class="kw">is</span> <span class="va">False</span>,  <span class="co"># fail-closed: don&#39;t ignore</span></span>
+<span id="cb10-46"><a href="#cb10-46" aria-hidden="true" tabindex="-1"></a>            target_purpose<span class="op">=</span>config.get(<span class="st">&quot;target_purpose&quot;</span>, <span class="st">&quot;&quot;</span>),</span>
+<span id="cb10-47"><a href="#cb10-47" aria-hidden="true" tabindex="-1"></a>        )</span>
+<span id="cb10-48"><a href="#cb10-48" aria-hidden="true" tabindex="-1"></a>        </span>
+<span id="cb10-49"><a href="#cb10-49" aria-hidden="true" tabindex="-1"></a>        <span class="co"># Transform to SecMate format</span></span>
+<span id="cb10-50"><a href="#cb10-50" aria-hidden="true" tabindex="-1"></a>        <span class="cf">return</span> <span class="va">self</span>.mapper.to_secmate_assessment(risk_assessment, config)</span></code></pre></div>
+<h3 id="step-6-implement-deepteam-mapper">3.7 Step 6: Implement DeepTeam
+Mapper</h3>
+<p><strong>src/adapters/deepteam_mapper.py:</strong></p>
+<div class="sourceCode" id="cb11"><pre
+class="sourceCode python"><code class="sourceCode python"><span id="cb11-1"><a href="#cb11-1" aria-hidden="true" tabindex="-1"></a><span class="im">from</span> typing <span class="im">import</span> Dict, Any, List</span>
+<span id="cb11-2"><a href="#cb11-2" aria-hidden="true" tabindex="-1"></a><span class="im">from</span> deepteam.red_teamer.risk_assessment <span class="im">import</span> RiskAssessment</span>
+<span id="cb11-3"><a href="#cb11-3" aria-hidden="true" tabindex="-1"></a><span class="im">from</span> deepteam.test_case <span class="im">import</span> RTTestCase</span>
+<span id="cb11-4"><a href="#cb11-4" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb11-5"><a href="#cb11-5" aria-hidden="true" tabindex="-1"></a><span class="kw">class</span> DeepTeamMapper:</span>
+<span id="cb11-6"><a href="#cb11-6" aria-hidden="true" tabindex="-1"></a>    <span class="kw">def</span> to_secmate_assessment(<span class="va">self</span>, ra: RiskAssessment, config: Dict) <span class="op">-&gt;</span> Dict:</span>
+<span id="cb11-7"><a href="#cb11-7" aria-hidden="true" tabindex="-1"></a>        findings <span class="op">=</span> []</span>
+<span id="cb11-8"><a href="#cb11-8" aria-hidden="true" tabindex="-1"></a>        <span class="cf">for</span> tc <span class="kw">in</span> ra.test_cases:</span>
+<span id="cb11-9"><a href="#cb11-9" aria-hidden="true" tabindex="-1"></a>            finding <span class="op">=</span> <span class="va">self</span>._map_test_case(tc, config)</span>
+<span id="cb11-10"><a href="#cb11-10" aria-hidden="true" tabindex="-1"></a>            findings.append(finding)</span>
+<span id="cb11-11"><a href="#cb11-11" aria-hidden="true" tabindex="-1"></a>        <span class="co"># Compute advisory result</span></span>
+<span id="cb11-12"><a href="#cb11-12" aria-hidden="true" tabindex="-1"></a>        advisory <span class="op">=</span> <span class="va">self</span>._compute_advisory(findings)</span>
+<span id="cb11-13"><a href="#cb11-13" aria-hidden="true" tabindex="-1"></a>        <span class="cf">return</span> {</span>
+<span id="cb11-14"><a href="#cb11-14" aria-hidden="true" tabindex="-1"></a>            <span class="st">&quot;assessment&quot;</span>: {...},</span>
+<span id="cb11-15"><a href="#cb11-15" aria-hidden="true" tabindex="-1"></a>            <span class="st">&quot;findings&quot;</span>: findings,</span>
+<span id="cb11-16"><a href="#cb11-16" aria-hidden="true" tabindex="-1"></a>            <span class="st">&quot;report&quot;</span>: {...},</span>
+<span id="cb11-17"><a href="#cb11-17" aria-hidden="true" tabindex="-1"></a>            <span class="st">&quot;overview&quot;</span>: ra.overview.model_dump() <span class="cf">if</span> <span class="bu">hasattr</span>(ra.overview, <span class="st">&#39;model_dump&#39;</span>) <span class="cf">else</span> {}</span>
+<span id="cb11-18"><a href="#cb11-18" aria-hidden="true" tabindex="-1"></a>        }</span>
+<span id="cb11-19"><a href="#cb11-19" aria-hidden="true" tabindex="-1"></a>    </span>
+<span id="cb11-20"><a href="#cb11-20" aria-hidden="true" tabindex="-1"></a>    <span class="kw">def</span> _map_test_case(<span class="va">self</span>, tc: RTTestCase, config: Dict) <span class="op">-&gt;</span> Dict:</span>
+<span id="cb11-21"><a href="#cb11-21" aria-hidden="true" tabindex="-1"></a>        <span class="co"># Map severity</span></span>
+<span id="cb11-22"><a href="#cb11-22" aria-hidden="true" tabindex="-1"></a>        severity <span class="op">=</span> <span class="va">self</span>._map_severity(tc.risk_category <span class="kw">or</span> <span class="st">&quot;MEDIUM&quot;</span>)</span>
+<span id="cb11-23"><a href="#cb11-23" aria-hidden="true" tabindex="-1"></a>        <span class="cf">return</span> {</span>
+<span id="cb11-24"><a href="#cb11-24" aria-hidden="true" tabindex="-1"></a>            <span class="st">&quot;id&quot;</span>: <span class="ss">f&quot;FND-</span><span class="sc">{</span>uuid<span class="sc">.</span>uuid4()<span class="sc">.</span><span class="bu">hex</span>[:<span class="dv">8</span>]<span class="sc">.</span>upper()<span class="sc">}</span><span class="ss">&quot;</span>,</span>
+<span id="cb11-25"><a href="#cb11-25" aria-hidden="true" tabindex="-1"></a>            <span class="st">&quot;title&quot;</span>: <span class="ss">f&quot;</span><span class="sc">{</span>tc<span class="sc">.</span>vulnerability<span class="sc">}</span><span class="ss"> (</span><span class="sc">{</span>tc<span class="sc">.</span>attack_method <span class="kw">or</span> <span class="st">&#39;baseline&#39;</span><span class="sc">}</span><span class="ss">)&quot;</span>,</span>
+<span id="cb11-26"><a href="#cb11-26" aria-hidden="true" tabindex="-1"></a>            <span class="st">&quot;severity&quot;</span>: severity,</span>
+<span id="cb11-27"><a href="#cb11-27" aria-hidden="true" tabindex="-1"></a>            <span class="st">&quot;status&quot;</span>: <span class="st">&quot;OPEN&quot;</span>,</span>
+<span id="cb11-28"><a href="#cb11-28" aria-hidden="true" tabindex="-1"></a>            <span class="st">&quot;confidence&quot;</span>: tc.score <span class="cf">if</span> tc.score <span class="kw">is</span> <span class="kw">not</span> <span class="va">None</span> <span class="cf">else</span> <span class="fl">0.5</span>,</span>
+<span id="cb11-29"><a href="#cb11-29" aria-hidden="true" tabindex="-1"></a>            <span class="st">&quot;expectedBehavior&quot;</span>: <span class="ss">f&quot;Target must resist </span><span class="sc">{</span>tc<span class="sc">.</span>vulnerability_type<span class="sc">.</span>value <span class="cf">if</span> <span class="bu">hasattr</span>(tc.vulnerability_type,<span class="st">&#39;value&#39;</span>) <span class="cf">else</span> tc<span class="sc">.</span>vulnerability_type<span class="sc">}</span><span class="ss">&quot;</span>,</span>
+<span id="cb11-30"><a href="#cb11-30" aria-hidden="true" tabindex="-1"></a>            <span class="st">&quot;observedBehavior&quot;</span>: tc.actual_output <span class="kw">or</span> tc.error <span class="kw">or</span> <span class="st">&quot;No response captured&quot;</span>,</span>
+<span id="cb11-31"><a href="#cb11-31" aria-hidden="true" tabindex="-1"></a>            <span class="st">&quot;evidence&quot;</span>: <span class="va">self</span>._build_evidence(tc),</span>
+<span id="cb11-32"><a href="#cb11-32" aria-hidden="true" tabindex="-1"></a>            <span class="st">&quot;toolAttempt&quot;</span>: <span class="va">self</span>._extract_tool_attempt(tc),</span>
+<span id="cb11-33"><a href="#cb11-33" aria-hidden="true" tabindex="-1"></a>            <span class="st">&quot;oracleResult&quot;</span>: <span class="st">&quot;PENDING_DETERMINISTIC&quot;</span>,  <span class="co"># filled by policy engine</span></span>
+<span id="cb11-34"><a href="#cb11-34" aria-hidden="true" tabindex="-1"></a>            <span class="st">&quot;judgeRationale&quot;</span>: tc.reason <span class="kw">or</span> <span class="st">&quot;&quot;</span>,</span>
+<span id="cb11-35"><a href="#cb11-35" aria-hidden="true" tabindex="-1"></a>            <span class="st">&quot;standards&quot;</span>: <span class="va">self</span>._map_standards(tc.vulnerability_type),</span>
+<span id="cb11-36"><a href="#cb11-36" aria-hidden="true" tabindex="-1"></a>            <span class="st">&quot;remediation&quot;</span>: <span class="st">&quot;Review and enforce boundary per TRD guidance&quot;</span>,</span>
+<span id="cb11-37"><a href="#cb11-37" aria-hidden="true" tabindex="-1"></a>            <span class="st">&quot;regressionPinned&quot;</span>: <span class="va">False</span>,</span>
+<span id="cb11-38"><a href="#cb11-38" aria-hidden="true" tabindex="-1"></a>            <span class="st">&quot;createdAt&quot;</span>: datetime.utcnow().isoformat() <span class="op">+</span> <span class="st">&quot;Z&quot;</span></span>
+<span id="cb11-39"><a href="#cb11-39" aria-hidden="true" tabindex="-1"></a>        }</span></code></pre></div>
+<h3 id="step-7-wire-api-endpoints">3.8 Step 7: Wire API Endpoints</h3>
+<p><strong>src/routers/assessments.py:</strong></p>
+<div class="sourceCode" id="cb12"><pre
+class="sourceCode python"><code class="sourceCode python"><span id="cb12-1"><a href="#cb12-1" aria-hidden="true" tabindex="-1"></a><span class="im">from</span> fastapi <span class="im">import</span> APIRouter, BackgroundTasks, HTTPException</span>
+<span id="cb12-2"><a href="#cb12-2" aria-hidden="true" tabindex="-1"></a><span class="im">from</span> typing <span class="im">import</span> Dict, Any</span>
+<span id="cb12-3"><a href="#cb12-3" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb12-4"><a href="#cb12-4" aria-hidden="true" tabindex="-1"></a>router <span class="op">=</span> APIRouter(prefix<span class="op">=</span><span class="st">&quot;/api/v1/assessments&quot;</span>, tags<span class="op">=</span>[<span class="st">&quot;assessments&quot;</span>])</span>
+<span id="cb12-5"><a href="#cb12-5" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb12-6"><a href="#cb12-6" aria-hidden="true" tabindex="-1"></a><span class="at">@router.post</span>(<span class="st">&quot;/&quot;</span>)</span>
+<span id="cb12-7"><a href="#cb12-7" aria-hidden="true" tabindex="-1"></a><span class="cf">async</span> <span class="kw">def</span> create_assessment(payload: Dict[<span class="bu">str</span>, Any], background_tasks: BackgroundTasks):</span>
+<span id="cb12-8"><a href="#cb12-8" aria-hidden="true" tabindex="-1"></a>    <span class="co"># Validate against SecMate schema</span></span>
+<span id="cb12-9"><a href="#cb12-9" aria-hidden="true" tabindex="-1"></a>    job_id <span class="op">=</span> <span class="bu">str</span>(uuid.uuid4())</span>
+<span id="cb12-10"><a href="#cb12-10" aria-hidden="true" tabindex="-1"></a>    background_tasks.add_task(run_assessment_job, job_id, payload)</span>
+<span id="cb12-11"><a href="#cb12-11" aria-hidden="true" tabindex="-1"></a>    <span class="cf">return</span> {<span class="st">&quot;jobId&quot;</span>: job_id, <span class="st">&quot;status&quot;</span>: <span class="st">&quot;RUNNING&quot;</span>}</span>
+<span id="cb12-12"><a href="#cb12-12" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb12-13"><a href="#cb12-13" aria-hidden="true" tabindex="-1"></a><span class="at">@router.get</span>(<span class="st">&quot;/</span><span class="sc">{assessment_id}</span><span class="st">&quot;</span>)</span>
+<span id="cb12-14"><a href="#cb12-14" aria-hidden="true" tabindex="-1"></a><span class="cf">async</span> <span class="kw">def</span> get_assessment(assessment_id: <span class="bu">str</span>):</span>
+<span id="cb12-15"><a href="#cb12-15" aria-hidden="true" tabindex="-1"></a>    <span class="co"># Return assessment state</span></span>
+<span id="cb12-16"><a href="#cb12-16" aria-hidden="true" tabindex="-1"></a>    <span class="cf">pass</span></span>
+<span id="cb12-17"><a href="#cb12-17" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb12-18"><a href="#cb12-18" aria-hidden="true" tabindex="-1"></a><span class="cf">async</span> <span class="kw">def</span> run_assessment_job(job_id: <span class="bu">str</span>, payload: Dict):</span>
+<span id="cb12-19"><a href="#cb12-19" aria-hidden="true" tabindex="-1"></a>    <span class="co"># Execute orchestrator</span></span>
+<span id="cb12-20"><a href="#cb12-20" aria-hidden="true" tabindex="-1"></a>    result <span class="op">=</span> <span class="cf">await</span> orchestrator.run_assessment(payload)</span>
+<span id="cb12-21"><a href="#cb12-21" aria-hidden="true" tabindex="-1"></a>    <span class="co"># Persist to store (in-memory or DB)</span></span>
+<span id="cb12-22"><a href="#cb12-22" aria-hidden="true" tabindex="-1"></a>    <span class="cf">await</span> store.save(job_id, result)</span></code></pre></div>
+<p><strong>src/main.py:</strong></p>
+<div class="sourceCode" id="cb13"><pre
+class="sourceCode python"><code class="sourceCode python"><span id="cb13-1"><a href="#cb13-1" aria-hidden="true" tabindex="-1"></a><span class="im">from</span> fastapi <span class="im">import</span> FastAPI</span>
+<span id="cb13-2"><a href="#cb13-2" aria-hidden="true" tabindex="-1"></a><span class="im">from</span> fastapi.middleware.cors <span class="im">import</span> CORSMiddleware</span>
+<span id="cb13-3"><a href="#cb13-3" aria-hidden="true" tabindex="-1"></a><span class="im">from</span> src.config <span class="im">import</span> settings</span>
+<span id="cb13-4"><a href="#cb13-4" aria-hidden="true" tabindex="-1"></a><span class="im">from</span> src.routers <span class="im">import</span> assessments, targets, findings, reports</span>
+<span id="cb13-5"><a href="#cb13-5" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb13-6"><a href="#cb13-6" aria-hidden="true" tabindex="-1"></a>app <span class="op">=</span> FastAPI(title<span class="op">=</span>settings.app_name)</span>
+<span id="cb13-7"><a href="#cb13-7" aria-hidden="true" tabindex="-1"></a>app.add_middleware(</span>
+<span id="cb13-8"><a href="#cb13-8" aria-hidden="true" tabindex="-1"></a>    CORSMiddleware,</span>
+<span id="cb13-9"><a href="#cb13-9" aria-hidden="true" tabindex="-1"></a>    allow_origins<span class="op">=</span>settings.cors_origins,</span>
+<span id="cb13-10"><a href="#cb13-10" aria-hidden="true" tabindex="-1"></a>    allow_credentials<span class="op">=</span><span class="va">True</span>,</span>
+<span id="cb13-11"><a href="#cb13-11" aria-hidden="true" tabindex="-1"></a>    allow_methods<span class="op">=</span>[<span class="st">&quot;*&quot;</span>],</span>
+<span id="cb13-12"><a href="#cb13-12" aria-hidden="true" tabindex="-1"></a>    allow_headers<span class="op">=</span>[<span class="st">&quot;*&quot;</span>],</span>
+<span id="cb13-13"><a href="#cb13-13" aria-hidden="true" tabindex="-1"></a>)</span>
+<span id="cb13-14"><a href="#cb13-14" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb13-15"><a href="#cb13-15" aria-hidden="true" tabindex="-1"></a>app.include_router(targets.router)</span>
+<span id="cb13-16"><a href="#cb13-16" aria-hidden="true" tabindex="-1"></a>app.include_router(assessments.router)</span>
+<span id="cb13-17"><a href="#cb13-17" aria-hidden="true" tabindex="-1"></a>app.include_router(findings.router)</span>
+<span id="cb13-18"><a href="#cb13-18" aria-hidden="true" tabindex="-1"></a>app.include_router(reports.router)</span>
+<span id="cb13-19"><a href="#cb13-19" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb13-20"><a href="#cb13-20" aria-hidden="true" tabindex="-1"></a><span class="at">@app.get</span>(<span class="st">&quot;/health&quot;</span>)</span>
+<span id="cb13-21"><a href="#cb13-21" aria-hidden="true" tabindex="-1"></a><span class="cf">async</span> <span class="kw">def</span> health():</span>
+<span id="cb13-22"><a href="#cb13-22" aria-hidden="true" tabindex="-1"></a>    <span class="cf">return</span> {<span class="st">&quot;status&quot;</span>: <span class="st">&quot;ok&quot;</span>, <span class="st">&quot;sandbox_mode&quot;</span>: settings.sandbox_mode}</span></code></pre></div>
+<h3 id="step-8-update-frontend-to-call-api">3.9 Step 8: Update Frontend
+to Call API</h3>
+<p>Modify <code>secmate/apps/web/src/platformService.ts</code> to
+support real API with fallback to mocks.</p>
+<p><strong>Add API client:</strong></p>
+<div class="sourceCode" id="cb14"><pre
+class="sourceCode typescript"><code class="sourceCode typescript"><span id="cb14-1"><a href="#cb14-1" aria-hidden="true" tabindex="-1"></a><span class="kw">const</span> API_BASE <span class="op">=</span> import<span class="op">.</span><span class="at">meta</span><span class="op">.</span><span class="at">env</span><span class="op">.</span><span class="at">VITE_API_BASE_URL</span> <span class="op">||</span> <span class="st">&quot;&quot;</span><span class="op">;</span></span>
+<span id="cb14-2"><a href="#cb14-2" aria-hidden="true" tabindex="-1"></a><span class="kw">const</span> USE_MOCK <span class="op">=</span> import<span class="op">.</span><span class="at">meta</span><span class="op">.</span><span class="at">env</span><span class="op">.</span><span class="at">VITE_MOCK_MODE</span> <span class="op">!==</span> <span class="st">&quot;false&quot;</span> <span class="op">&amp;&amp;</span> <span class="op">!</span>API_BASE<span class="op">;</span></span>
+<span id="cb14-3"><a href="#cb14-3" aria-hidden="true" tabindex="-1"></a></span>
+<span id="cb14-4"><a href="#cb14-4" aria-hidden="true" tabindex="-1"></a><span class="kw">async</span> <span class="kw">function</span> <span class="fu">api</span><span class="op">&lt;</span>T<span class="op">&gt;</span>(path<span class="op">:</span> <span class="dt">string</span><span class="op">,</span> init<span class="op">?:</span> RequestInit)<span class="op">:</span> <span class="bu">Promise</span><span class="op">&lt;</span>T<span class="op">&gt;</span> {</span>
+<span id="cb14-5"><a href="#cb14-5" aria-hidden="true" tabindex="-1"></a>  <span class="cf">if</span> (USE_MOCK) <span class="cf">throw</span> <span class="kw">new</span> <span class="bu">Error</span>(<span class="st">&quot;Mock mode&quot;</span>)<span class="op">;</span></span>
+<span id="cb14-6"><a href="#cb14-6" aria-hidden="true" tabindex="-1"></a>  <span class="kw">const</span> res <span class="op">=</span> <span class="cf">await</span> <span class="fu">fetch</span>(<span class="vs">`</span><span class="sc">${</span>API_BASE<span class="sc">}${</span>path<span class="sc">}</span><span class="vs">`</span><span class="op">,</span> {</span>
+<span id="cb14-7"><a href="#cb14-7" aria-hidden="true" tabindex="-1"></a>    headers<span class="op">:</span> { <span class="st">&quot;Content-Type&quot;</span><span class="op">:</span> <span class="st">&quot;application/json&quot;</span><span class="op">,</span> <span class="op">...</span>(init<span class="op">?.</span><span class="at">headers</span> <span class="op">||</span> {}) }<span class="op">,</span></span>
+<span id="cb14-8"><a href="#cb14-8" aria-hidden="true" tabindex="-1"></a>    <span class="op">...</span>init<span class="op">,</span></span>
+<span id="cb14-9"><a href="#cb14-9" aria-hidden="true" tabindex="-1"></a>  })<span class="op">;</span></span>
+<span id="cb14-10"><a href="#cb14-10" aria-hidden="true" tabindex="-1"></a>  <span class="cf">if</span> (<span class="op">!</span>res<span class="op">.</span><span class="at">ok</span>) <span class="cf">throw</span> <span class="kw">new</span> <span class="bu">Error</span>(<span class="cf">await</span> res<span class="op">.</span><span class="fu">text</span>())<span class="op">;</span></span>
+<span id="cb14-11"><a href="#cb14-11" aria-hidden="true" tabindex="-1"></a>  <span class="cf">return</span> res<span class="op">.</span><span class="fu">json</span>()<span class="op">;</span></span>
+<span id="cb14-12"><a href="#cb14-12" aria-hidden="true" tabindex="-1"></a>}</span></code></pre></div>
+<p>Update <code>createAssessment</code>:</p>
+<div class="sourceCode" id="cb15"><pre
+class="sourceCode typescript"><code class="sourceCode typescript"><span id="cb15-1"><a href="#cb15-1" aria-hidden="true" tabindex="-1"></a><span class="kw">async</span> <span class="fu">createAssessment</span>(input<span class="op">:</span> NewAssessment) {</span>
+<span id="cb15-2"><a href="#cb15-2" aria-hidden="true" tabindex="-1"></a>  <span class="cf">if</span> (<span class="op">!</span>USE_MOCK) {</span>
+<span id="cb15-3"><a href="#cb15-3" aria-hidden="true" tabindex="-1"></a>    <span class="kw">const</span> res <span class="op">=</span> <span class="cf">await</span> <span class="fu">api</span><span class="op">&lt;</span>{ jobId<span class="op">:</span> <span class="dt">string</span> }<span class="op">&gt;</span>(<span class="st">&quot;/api/v1/assessments/&quot;</span><span class="op">,</span> {</span>
+<span id="cb15-4"><a href="#cb15-4" aria-hidden="true" tabindex="-1"></a>      method<span class="op">:</span> <span class="st">&quot;POST&quot;</span><span class="op">,</span></span>
+<span id="cb15-5"><a href="#cb15-5" aria-hidden="true" tabindex="-1"></a>      body<span class="op">:</span> <span class="bu">JSON</span><span class="op">.</span><span class="fu">stringify</span>(input)<span class="op">,</span></span>
+<span id="cb15-6"><a href="#cb15-6" aria-hidden="true" tabindex="-1"></a>    })<span class="op">;</span></span>
+<span id="cb15-7"><a href="#cb15-7" aria-hidden="true" tabindex="-1"></a>    <span class="co">// Poll or subscribe for completion</span></span>
+<span id="cb15-8"><a href="#cb15-8" aria-hidden="true" tabindex="-1"></a>    <span class="co">// Return assessment when ready</span></span>
+<span id="cb15-9"><a href="#cb15-9" aria-hidden="true" tabindex="-1"></a>  }</span>
+<span id="cb15-10"><a href="#cb15-10" aria-hidden="true" tabindex="-1"></a>  <span class="co">// ... existing mock logic as fallback</span></span>
+<span id="cb15-11"><a href="#cb15-11" aria-hidden="true" tabindex="-1"></a>}</span></code></pre></div>
+<p>Add <code>.env.example</code> in web:</p>
+<pre class="env"><code>VITE_API_BASE_URL=http://localhost:8000
+VITE_MOCK_MODE=true  # set to false when API ready</code></pre>
+<h3 id="step-9-safety-controls-implementation">3.10 Step 9: Safety
+Controls Implementation</h3>
+<p>Enforce all SecMate safety requirements:</p>
+<ol type="1">
+<li><strong>Sandbox enforcement:</strong> In
+<code>target_gateway.py</code>, if <code>settings.sandbox_mode</code>
+and tool is mutating → only call mock/stub. Block if attempting real
+external call.</li>
+<li><strong>Redaction:</strong> <code>src/utils/redaction.py</code> to
+strip API keys, tokens, auth headers from audit logs. Scan all
+serialized strings.</li>
+<li><strong>Fail-closed:</strong> In orchestrator, catch exceptions. If
+harness error/timeout → set advisoryResult to <code>HARNESS_ERROR</code>
+or <code>ASSESSMENT_INCONCLUSIVE</code> (never <code>PASS</code>). Treat
+incomplete progressions as errors when
+<code>fail_closed=True</code>.</li>
+<li><strong>Deterministic-first:</strong> Policy engine runs before
+DeepTeam semantic evaluation for tool calls. Record
+<code>oracleResult</code> from deterministic checks.</li>
+<li><strong>Budgets:</strong> Enforce <code>max_turns</code> (1-5),
+<code>token_budget</code>, <code>timeout_seconds</code> per assessment.
+Abort if exceeded.</li>
+<li><strong>Correlation IDs:</strong> Attach to all logs, telemetry,
+audit entries.</li>
+<li><strong>No secret persistence:</strong> Never store raw credentials;
+load from env only.</li>
+<li><strong>Immutable audits:</strong> Serialize with timestamp,
+versions, hashes. Make append-only.</li>
+</ol>
+<h3 id="step-10-export-formats">3.11 Step 10: Export Formats</h3>
+<p>Implement exporters in <code>audit_serializer.py</code>:</p>
+<ul>
+<li><strong>JSON (primary):</strong> Full audit bundle with findings,
+evidence, turns, tool calls, config, versions</li>
+<li><strong>SARIF 2.1.0 (for security tooling):</strong> Map findings to
+SARIF results with rules, locations, message</li>
+<li><strong>JUnit XML (for CI):</strong> Map to test cases/failures
+based on severity (CRITICAL/HIGH → failure)</li>
+</ul>
+<p><strong>SARIF mapping example:</strong> - RuleId = finding.id or
+vulnerability - Level = error/warning/note mapped from severity
+(CRITICAL/HIGH→error, MEDIUM→warning, LOW→note) - Message =
+evidence/observed behavior - Locations = assessment/target context</p>
+<hr />
+<h2 id="integration-readiness-assessment">4. Integration Readiness
+Assessment</h2>
+<table>
+<colgroup>
+<col style="width: 33%" />
+<col style="width: 33%" />
+<col style="width: 33%" />
+</colgroup>
+<thead>
+<tr>
+<th>Area</th>
+<th>Status</th>
+<th>Notes</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>DeepTeam API understanding</td>
+<td>✅ Ready</td>
+<td>Clear APIs for red_team(), RedTeamer, frameworks</td>
+</tr>
+<tr>
+<td>SecMate contracts</td>
+<td>✅ Ready</td>
+<td>Well-defined TS types match TRD schemas</td>
+</tr>
+<tr>
+<td>Architecture alignment</td>
+<td>✅ Ready</td>
+<td>Matches TRD-1/2 broker + gateway + dual-stage vision</td>
+</tr>
+<tr>
+<td>Safety requirements</td>
+<td>✅ Ready</td>
+<td>Explicitly documented; implementable in gateway/audit layer</td>
+</tr>
+<tr>
+<td>Frontend compatibility</td>
+<td>✅ Ready</td>
+<td>Easy to swap mock service to REST API</td>
+</tr>
+<tr>
+<td>Async execution model</td>
+<td>✅ Ready</td>
+<td>DeepTeam supports async; need job polling for long runs</td>
+</tr>
+<tr>
+<td>Multi-turn (1-5)</td>
+<td>✅ Ready</td>
+<td>DeepTeam supports bounded multi-turn; enforce caps</td>
+</tr>
+<tr>
+<td>Framework mapping</td>
+<td>✅ Ready</td>
+<td>OWASP/MITRE available out-of-box</td>
+</tr>
+<tr>
+<td>Export formats</td>
+<td>🟡 Partial</td>
+<td>JSON easy; SARIF/JUnit need implementation</td>
+</tr>
+<tr>
+<td>Deterministic policy engine</td>
+<td>🔴 Missing</td>
+<td>Needs custom implementation (not in DeepTeam)</td>
+</tr>
+<tr>
+<td>Target gateway/interceptor</td>
+<td>🔴 Missing</td>
+<td>Needs custom implementation per TRD</td>
+</tr>
+</tbody>
+</table>
+<p><strong>Overall Readiness:</strong> 80% - Core integration is
+straightforward. The main custom work is the Target Gateway +
+Deterministic Policy Engine + Audit Serializer (all required by SecMate
+TRDs, not provided by DeepTeam).</p>
+<hr />
+<h2 id="implementation-roadmap">5. Implementation Roadmap</h2>
+<table>
+<colgroup>
+<col style="width: 25%" />
+<col style="width: 25%" />
+<col style="width: 25%" />
+<col style="width: 25%" />
+</colgroup>
+<thead>
+<tr>
+<th>Phase</th>
+<th>Tasks</th>
+<th>Effort</th>
+<th>Priority</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><strong>Phase 0: Design</strong></td>
+<td>Finalize API contracts, Pydantic schemas, mapper design, review TRD
+gates</td>
+<td>0.5 day</td>
+<td>P0</td>
+</tr>
+<tr>
+<td><strong>Phase 1: Backend Scaffold</strong></td>
+<td>Create FastAPI app, config, routers, health endpoints, CORS</td>
+<td>0.5 day</td>
+<td>P0</td>
+</tr>
+<tr>
+<td><strong>Phase 2: Core Services</strong></td>
+<td>Implement DeepTeam Orchestrator + DeepTeamMapper (basic
+mapping)</td>
+<td>1 day</td>
+<td>P0</td>
+</tr>
+<tr>
+<td><strong>Phase 3: Gateway + Policy Engine</strong></td>
+<td>Build Target Gateway, deterministic policy engine with tool-category
+rules, sandbox/mock routing</td>
+<td>1-2 days</td>
+<td>P0 (Critical for safety)</td>
+</tr>
+<tr>
+<td><strong>Phase 4: API Integration</strong></td>
+<td>Wire assessments/targets/findings/reports endpoints; background job
+execution; state store</td>
+<td>0.5-1 day</td>
+<td>P0</td>
+</tr>
+<tr>
+<td><strong>Phase 5: Frontend Wiring</strong></td>
+<td>Update platformService to call API with feature flag
+(VITE_MOCK_MODE=false); add polling/status UI</td>
+<td>0.5 day</td>
+<td>P0</td>
+</tr>
+<tr>
+<td><strong>Phase 6: Audit &amp; Exports</strong></td>
+<td>Implement redaction, immutable audit bundles, JSON export; SARIF
+2.1.0 skeleton; JUnit XML</td>
+<td>0.5-1 day</td>
+<td>P1</td>
+</tr>
+<tr>
+<td><strong>Phase 7: Testing &amp; Validation</strong></td>
+<td>E2E test with demo targets (SOCMate/GuardMate/TicketMate/ChatMate);
+verify fail-closed, budgets, timeouts</td>
+<td>0.5-1 day</td>
+<td>P0</td>
+</tr>
+<tr>
+<td><strong>Phase 8: Hardening</strong></td>
+<td>Rate limiting, error handling, correlation IDs, structured logging,
+secrets scan</td>
+<td>0.5 day</td>
+<td>P1</td>
+</tr>
+</tbody>
+</table>
+<p><strong>Total estimated effort:</strong> 5-7 person-days for MVP
+integration meeting core TRD requirements.</p>
+<hr />
+<h2 id="key-recommendations">6. Key Recommendations</h2>
+<ol type="1">
+<li><strong>Start with framework-based red teaming</strong> - Use
+<code>OWASPTop10()</code> initially; it’s comprehensive and maps well to
+SecMate’s standards. Customize per target manifest as maturity
+increases.</li>
+<li><strong>Enforce deterministic-first verification</strong> - Never
+rely solely on DeepTeam’s semantic judge. The Target Gateway’s policy
+engine must be the source of truth for hard action-space violations
+(tool categories, role boundaries, network ranges, etc.).</li>
+<li><strong>Make execution async from day one</strong> - Multi-turn red
+teaming can take minutes. Use background jobs + polling (or SSE) to
+avoid blocking the UI.</li>
+<li><strong>Fail-closed by default</strong> - Set
+<code>fail_closed=True</code>, <code>ignore_errors=False</code>. Any
+harness error, timeout, or insufficient evidence must yield
+<code>HARNESS_ERROR</code>/<code>ASSESSMENT_INCONCLUSIVE</code>, never
+<code>PASS</code>.</li>
+<li><strong>Sandbox everything mutating</strong> - Default to
+<code>sandbox_mode=True</code>. The gateway must block
+mutating/administrative tool calls unless routed to an explicit
+mock/stub.</li>
+<li><strong>Redact aggressively</strong> - Treat all strings in audit
+bundles as potentially sensitive. Strip API keys, auth headers, tokens,
+PII before persistence.</li>
+<li><strong>Preserve full replayability</strong> - Store: probe text,
+all turns, intercepted tool calls + args (redacted), deterministic
+findings, judge verdict + reasoning, model versions, temp, budgets,
+timestamps, correlation IDs.</li>
+<li><strong>Feature-flag the integration</strong> - Keep
+<code>VITE_MOCK_MODE=true</code> as default until backend is stable and
+safety controls validated.</li>
+<li><strong>Version everything</strong> - Track schema versions (align
+with platformService’s <code>schemaVersion: 1</code>), DeepTeam version,
+SecMate API version in audit bundles.</li>
+<li><strong>Start minimal, validate against TRD gates</strong> - Before
+expanding, satisfy the acceptance gates from TRD-2 (frontend-approved,
+safety controls verified, fail-closed tested, replayability
+confirmed).</li>
+</ol>
+<hr />
+<h2 id="success-criteria">7. Success Criteria</h2>
+<p>Integration is considered complete when:</p>
+<ul class="task-list">
+<li><label><input type="checkbox" />Frontend can trigger an assessment
+via API (with feature flag off) and display results</label></li>
+<li><label><input type="checkbox" />DeepTeam RiskAssessment correctly
+transforms to SecMate Finding/Assessment/Report</label></li>
+<li><label><input type="checkbox" />Target Gateway enforces
+tool-category scoping and deterministic checks</label></li>
+<li><label><input type="checkbox" />Mutating tools are never executed
+against real systems (sandbox-only enforced)</label></li>
+<li><label><input type="checkbox" />No secrets appear in any persisted
+audit log or exported JSON</label></li>
+<li><label><input type="checkbox" />Fail-closed behavior verified:
+timeout → <code>HARNESS_ERROR</code>/<code>INCONCLUSIVE</code>; error →
+not <code>PASS</code></label></li>
+<li><label><input type="checkbox" />Multi-turn is bounded (≤ 5 turns),
+rate-limited (max_concurrent), and respects token/time
+budgets</label></li>
+<li><label><input type="checkbox" />Full audit bundle supports
+deterministic replay (probe, turns, tool calls, model versions,
+config)</label></li>
+<li><label><input type="checkbox" />JSON export works from Reports page;
+SARIF stub at minimum</label></li>
+<li><label><input type="checkbox" />E2E smoke test passes for at least
+one demo target (e.g., SOCMate with Excessive Agency
+scenario)</label></li>
+</ul>
+<hr />
+<h2 id="conclusion">8. Conclusion</h2>
+<p>Integrating DeepTeam with SecMate is both feasible and strategically
+sound. DeepTeam provides the battle-tested red teaming engine, while
+SecMate provides the product experience and rigorous safety/assurance
+requirements that Paramount needs for internal use.</p>
+<p>The main implementation effort is building the SecMate-specific
+orchestration layer (Target Gateway, Deterministic Policy Engine, Audit
+Serializer) to bridge the two systems while upholding SecMate’s
+“action-space primacy” and fail-closed principles. With the phased
+approach outlined above, the integration can be completed in 5-7 days
+and will deliver a functional internal AI agent assurance capability
+aligned with TRD-1/2/2A.</p>
+<hr />
+<p><strong>Report Location:</strong>
+<code>C:\paramount\paramount-integration\INTEGRATION_REPORT.md</code></p>
